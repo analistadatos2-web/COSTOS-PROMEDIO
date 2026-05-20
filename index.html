@@ -157,6 +157,9 @@ tr:hover td{background:rgba(255,255,255,.02);}
 .ac-item{padding:7px 11px;cursor:pointer;font-size:11px;border-bottom:1px solid var(--border);}
 .ac-item:hover{background:var(--surface);}
 .role-locked{pointer-events:none !important;opacity:.3;filter:grayscale(1);}
+.th-sort{cursor:pointer;user-select:none;}
+.th-sort:hover{color:var(--accent);}
+.th-sort span{font-size:9px;margin-left:3px;color:var(--accent);}
 </style>
 </head>
 <body>
@@ -285,6 +288,10 @@ tr:hover td{background:rgba(255,255,255,.02);}
         <select id="filter-cat" onchange="renderTable()">
           <option value="">Todas las categorías</option>
         </select>
+        <select id="filter-mes" onchange="renderTable()" style="min-width:140px;">
+          <option value="">Todos los meses</option>
+        </select>
+        <button class="btn btn-ghost btn-sm" onclick="clearFilters()" style="white-space:nowrap;">✕ Limpiar</button>
       </div>
     </div>
     <div class="table-wrap">
@@ -294,9 +301,15 @@ tr:hover td{background:rgba(255,255,255,.02);}
       </div>
       <table id="main-table" style="display:none">
         <thead><tr>
-          <th>Referencia</th><th>Ref 2</th><th>Descripción</th>
-          <th>Categoría</th><th>Subcategoría</th>
-          <th>Inv WMS</th><th>Costo Promedio</th><th>Actualización</th><th></th>
+          <th onclick="sortBy('ref1')"  class="th-sort">Referencia <span id="sort-ref1"></span></th>
+          <th>Ref 2</th>
+          <th onclick="sortBy('desc')"  class="th-sort">Descripción <span id="sort-desc"></span></th>
+          <th onclick="sortBy('cat')"   class="th-sort">Categoría <span id="sort-cat"></span></th>
+          <th onclick="sortBy('sub')"   class="th-sort">Subcategoría <span id="sort-sub"></span></th>
+          <th onclick="sortBy('inv')"   class="th-sort">Inv WMS <span id="sort-inv"></span></th>
+          <th onclick="sortBy('costo')" class="th-sort">Costo Promedio <span id="sort-costo"></span></th>
+          <th onclick="sortBy('fecha')" class="th-sort">Actualización <span id="sort-fecha"></span></th>
+          <th></th>
         </tr></thead>
         <tbody id="tbody"></tbody>
       </table>
@@ -341,6 +354,8 @@ const LS_URL  = 'costos_api_url_v3';
 let API_URL   = localStorage.getItem(LS_URL) || '';
 let products  = [];
 let connected = false;
+var sortField = '';
+var sortDir   = 1; // 1 asc, -1 desc
 
 // ══════════════════════════════════════════
 //  JSONP
@@ -407,7 +422,7 @@ async function loadAll() {
     var d = await jsonpCall({ action:'getAll' });
     if (d && d.ok) {
       products = d.products || [];
-      renderTable(); updateStats(); refreshCatFilter();
+      renderTable(); updateStats(); refreshCatFilter(); refreshMesFilter();
       if (products.length) { hide('empty-state'); show('main-table'); }
       else setEmpty('El Maestro está vacío. Agrega productos desde el panel.');
     }
@@ -547,16 +562,98 @@ async function procesarISupport() {
   setBtn('btn-sync',false,'↻ Sincronizar con Sheets');
 }
 
+
+// ══════════════════════════════════════════
+//  SORT & MONTH FILTER
+// ══════════════════════════════════════════
+function sortBy(field) {
+  if (sortField === field) { sortDir *= -1; }
+  else { sortField = field; sortDir = 1; }
+  // Clear all indicators
+  ['ref1','desc','cat','sub','inv','costo','fecha'].forEach(function(f){
+    var el = document.getElementById('sort-'+f);
+    if (el) el.textContent = '';
+  });
+  var el = document.getElementById('sort-'+field);
+  if (el) el.textContent = sortDir === 1 ? '▲' : '▼';
+  renderTable();
+}
+
+function clearFilters() {
+  document.getElementById('search').value    = '';
+  document.getElementById('filter-cat').value = '';
+  document.getElementById('filter-mes').value = '';
+  sortField = ''; sortDir = 1;
+  ['ref1','desc','cat','sub','inv','costo','fecha'].forEach(function(f){
+    var el = document.getElementById('sort-'+f); if (el) el.textContent='';
+  });
+  renderTable();
+}
+
+function refreshMesFilter() {
+  // Build month list from product dates
+  var MONTHS = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+  var meses = {};
+  products.forEach(function(p) {
+    if (!p.fecha) return;
+    var d = new Date(p.fecha);
+    if (isNaN(d)) {
+      // try dd/mm/yyyy
+      var parts = String(p.fecha).split('/');
+      if (parts.length === 3) d = new Date(parts[2]+'-'+parts[1]+'-'+parts[0]);
+    }
+    if (!isNaN(d.getTime())) {
+      var key  = d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');
+      var label = MONTHS[d.getMonth()] + ' ' + d.getFullYear();
+      meses[key] = label;
+    }
+  });
+  var sel = document.getElementById('filter-mes');
+  var cur = sel.value;
+  sel.innerHTML = '<option value="">Todos los meses</option>';
+  Object.keys(meses).sort().reverse().forEach(function(k){
+    var o = document.createElement('option');
+    o.value = k; o.textContent = meses[k];
+    if (k === cur) o.selected = true;
+    sel.appendChild(o);
+  });
+}
+
+function getProductMonth(p) {
+  if (!p.fecha) return null;
+  var d = new Date(p.fecha);
+  if (isNaN(d)) {
+    var parts = String(p.fecha).split('/');
+    if (parts.length === 3) d = new Date(parts[2]+'-'+parts[1]+'-'+parts[0]);
+  }
+  if (isNaN(d.getTime())) return null;
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');
+}
+
 // ══════════════════════════════════════════
 //  RENDER TABLE
 // ══════════════════════════════════════════
 function renderTable() {
   var q   = (document.getElementById('search').value||'').toLowerCase();
   var cat = document.getElementById('filter-cat').value;
+  var mes = document.getElementById('filter-mes').value;
   var f   = products.filter(function(p){
     var m = !q || p.ref1.toLowerCase().includes(q) || (p.ref2||'').toLowerCase().includes(q) || p.desc.toLowerCase().includes(q);
-    return m && (!cat || p.cat===cat);
+    var c = !cat || p.cat===cat;
+    var d = !mes || getProductMonth(p)===mes;
+    return m && c && d;
   });
+  // Sort
+  if (sortField) {
+    f = f.slice().sort(function(a,b){
+      var av = a[sortField], bv = b[sortField];
+      if (sortField==='inv'||sortField==='costo') { av=parseFloat(av)||0; bv=parseFloat(bv)||0; }
+      else { av=String(av||'').toLowerCase(); bv=String(bv||'').toLowerCase(); }
+      if (av<bv) return -1*sortDir;
+      if (av>bv) return  1*sortDir;
+      return 0;
+    });
+  }
   var tbody = document.getElementById('tbody'); tbody.innerHTML='';
   if (!f.length) {
     show('empty-state'); hide('main-table');
