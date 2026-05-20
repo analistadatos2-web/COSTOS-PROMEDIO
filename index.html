@@ -288,8 +288,8 @@ tr:hover td{background:rgba(255,255,255,.02);}
         <select id="filter-cat" onchange="renderTable()">
           <option value="">Todas las categorías</option>
         </select>
-        <select id="filter-mes" onchange="renderTable()" style="min-width:140px;">
-          <option value="">Todos los meses</option>
+        <select id="filter-mes" onchange="renderTable()" style="min-width:160px;">
+          <option value="">Todas las fechas</option>
         </select>
         <button class="btn btn-ghost btn-sm" onclick="clearFilters()" style="white-space:nowrap;">✕ Limpiar</button>
       </div>
@@ -590,44 +590,44 @@ function clearFilters() {
   renderTable();
 }
 
+function parseDate(fecha) {
+  if (!fecha) return null;
+  var d = new Date(fecha);
+  if (!isNaN(d.getTime())) return d;
+  // try dd/mm/yyyy
+  var p = String(fecha).split('/');
+  if (p.length === 3) { d = new Date(p[2]+'-'+p[1].padStart(2,'0')+'-'+p[0].padStart(2,'0')); }
+  if (!isNaN(d.getTime())) return d;
+  // try "Wed Apr 08 2026 ..."
+  d = new Date(String(fecha).substring(0,15));
+  return isNaN(d.getTime()) ? null : d;
+}
+
 function refreshMesFilter() {
-  // Build month list from product dates
   var MONTHS = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
-  var meses = {};
+  var dias = {};
   products.forEach(function(p) {
-    if (!p.fecha) return;
-    var d = new Date(p.fecha);
-    if (isNaN(d)) {
-      // try dd/mm/yyyy
-      var parts = String(p.fecha).split('/');
-      if (parts.length === 3) d = new Date(parts[2]+'-'+parts[1]+'-'+parts[0]);
-    }
-    if (!isNaN(d.getTime())) {
-      var key  = d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');
-      var label = MONTHS[d.getMonth()] + ' ' + d.getFullYear();
-      meses[key] = label;
-    }
+    var d = parseDate(p.fecha);
+    if (!d) return;
+    var key   = d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+    var label = d.getDate()+' de '+MONTHS[d.getMonth()]+' '+d.getFullYear();
+    dias[key] = label;
   });
   var sel = document.getElementById('filter-mes');
   var cur = sel.value;
-  sel.innerHTML = '<option value="">Todos los meses</option>';
-  Object.keys(meses).sort().reverse().forEach(function(k){
+  sel.innerHTML = '<option value="">Todas las fechas</option>';
+  Object.keys(dias).sort().reverse().forEach(function(k){
     var o = document.createElement('option');
-    o.value = k; o.textContent = meses[k];
+    o.value = k; o.textContent = dias[k];
     if (k === cur) o.selected = true;
     sel.appendChild(o);
   });
 }
 
 function getProductMonth(p) {
-  if (!p.fecha) return null;
-  var d = new Date(p.fecha);
-  if (isNaN(d)) {
-    var parts = String(p.fecha).split('/');
-    if (parts.length === 3) d = new Date(parts[2]+'-'+parts[1]+'-'+parts[0]);
-  }
-  if (isNaN(d.getTime())) return null;
-  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');
+  var d = parseDate(p.fecha);
+  if (!d) return null;
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
 }
 
 // ══════════════════════════════════════════
