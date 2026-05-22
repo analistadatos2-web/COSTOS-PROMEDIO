@@ -215,46 +215,92 @@ tr:hover td{background:rgba(255,255,255,.02);}
 
     <div id="tab-orden" class="sidebar-section">
       <h2>Registrar Orden de Compra</h2>
-      <p class="tip">Busca la referencia, ingresa cantidad y costo nuevo. El costo promedio ponderado se calcula y guarda en Google Sheets.</p>
-      <div class="fr ac-wrap">
-        <label>Referencia</label>
-        <input type="text" id="ord-ref" placeholder="Ej: QF100G061-30" oninput="doAutocomplete(this)" autocomplete="off">
-        <div id="ord-ac"></div>
+      <!-- Subtabs -->
+      <div style="display:flex;gap:4px;margin-bottom:12px;">
+        <button class="subtab active" id="st-ord-1" onclick="showSubtab('ord',1)" style="flex:1;padding:5px;border-radius:6px;border:1px solid var(--border);background:var(--accent);color:#0d0f14;font-family:Syne,sans-serif;font-weight:700;font-size:11px;cursor:pointer;">Individual</button>
+        <button class="subtab" id="st-ord-2" onclick="showSubtab('ord',2)" style="flex:1;padding:5px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--muted);font-family:Syne,sans-serif;font-weight:700;font-size:11px;cursor:pointer;">Masivo</button>
       </div>
-      <div id="ord-preview" class="preview-box">
-        <div id="ord-prev-name" style="font-weight:700;margin-bottom:6px;"></div>
-        <div style="display:flex;gap:14px;">
-          <div><span style="color:var(--muted);font-size:10px;">Inv WMS</span><br><b id="ord-prev-inv" class="mono" style="color:var(--warn);"></b></div>
-          <div><span style="color:var(--muted);font-size:10px;">Costo Actual</span><br><b id="ord-prev-costo" class="mono" style="color:var(--accent);"></b></div>
+
+      <!-- Individual -->
+      <div id="ord-panel-1">
+        <p class="tip">Busca la referencia, ingresa cantidad y costo nuevo.</p>
+        <div class="fr ac-wrap">
+          <label>Referencia</label>
+          <input type="text" id="ord-ref" placeholder="Ej: QF100G061-30" oninput="doAutocomplete(this)" autocomplete="off">
+          <div id="ord-ac"></div>
         </div>
+        <div id="ord-preview" class="preview-box">
+          <div id="ord-prev-name" style="font-weight:700;margin-bottom:6px;"></div>
+          <div style="display:flex;gap:14px;">
+            <div><span style="color:var(--muted);font-size:10px;">Inv WMS</span><br><b id="ord-prev-inv" class="mono" style="color:var(--warn);"></b></div>
+            <div><span style="color:var(--muted);font-size:10px;">Costo Actual</span><br><b id="ord-prev-costo" class="mono" style="color:var(--accent);"></b></div>
+          </div>
+        </div>
+        <div class="fr2">
+          <div><label>Cantidad Nueva</label><input type="number" id="ord-qty" placeholder="0" min="0" oninput="calcPreview()"></div>
+          <div><label>Costo Unitario</label><input type="number" id="ord-cost" placeholder="0" min="0" oninput="calcPreview()"></div>
+        </div>
+        <div id="ord-result" class="result-box">
+          <div style="font-size:10px;color:var(--muted);margin-bottom:3px;">COSTO PROMEDIO NUEVO</div>
+          <div class="result-val" id="ord-result-val"></div>
+          <div class="result-detail" id="ord-result-detail"></div>
+        </div>
+        <button class="btn btn-primary" id="btn-aplicar" onclick="aplicarOrden()">✓ Actualizar Costo en Sheets</button>
       </div>
-      <div class="fr2">
-        <div><label>Cantidad Nueva</label><input type="number" id="ord-qty" placeholder="0" min="0" oninput="calcPreview()"></div>
-        <div><label>Costo Unitario</label><input type="number" id="ord-cost" placeholder="0" min="0" oninput="calcPreview()"></div>
+
+      <!-- Masivo -->
+      <div id="ord-panel-2" style="display:none">
+        <p class="tip">Pega desde Excel 3 columnas: <b style="color:var(--accent)">Referencia · Cantidad · Costo Unitario</b>. Una fila por orden.</p>
+        <div style="font-size:10px;color:var(--muted);margin-bottom:6px;font-family:DM Mono,monospace;">
+          Referencia&nbsp;&nbsp;&nbsp;&nbsp;Cantidad&nbsp;&nbsp;Costo<br>
+          QF100G061-30&nbsp;&nbsp;500&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;19500<br>
+          ESS-6105&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;300&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;95000
+        </div>
+        <textarea id="ord-masivo-paste" rows="8" style="resize:vertical;font-size:11px;" placeholder="Pega aquí desde Excel..."></textarea>
+        <div id="ord-masivo-preview" style="display:none;margin:8px 0;max-height:120px;overflow-y:auto;"></div>
+        <button class="btn btn-ghost btn-sm" style="width:100%;margin-bottom:8px;" onclick="previewMasivoOrden()">👁 Vista previa</button>
+        <button class="btn btn-primary" id="btn-masivo-orden" onclick="aplicarOrdenMasivo()">✓ Actualizar todos en Sheets</button>
       </div>
-      <div id="ord-result" class="result-box">
-        <div style="font-size:10px;color:var(--muted);margin-bottom:3px;">COSTO PROMEDIO NUEVO</div>
-        <div class="result-val" id="ord-result-val"></div>
-        <div class="result-detail" id="ord-result-detail"></div>
-      </div>
-      <button class="btn btn-primary" id="btn-aplicar" onclick="aplicarOrden()">✓ Actualizar Costo en Sheets</button>
     </div>
 
     <div id="tab-producto" class="sidebar-section" style="display:none">
       <h2>Agregar Nuevo Producto</h2>
-      <p class="tip">Solo para referencias que aún no existen en el Maestro.</p>
-      <div class="fr"><label>Referencia 1 *</label><input type="text" id="np-ref1" placeholder="ESS-XXXX"></div>
-      <div class="fr"><label>Referencia 2</label><input type="text" id="np-ref2" placeholder="Opcional"></div>
-      <div class="fr"><label>Descripción *</label><input type="text" id="np-desc" placeholder="Nombre del producto"></div>
-      <div class="fr2">
-        <div><label>Categoría</label><input type="text" id="np-cat" placeholder="PAPEL" list="cat-dl"><datalist id="cat-dl"></datalist></div>
-        <div><label>Subcategoría</label><input type="text" id="np-sub" placeholder="FASTDRY"></div>
+      <!-- Subtabs -->
+      <div style="display:flex;gap:4px;margin-bottom:12px;">
+        <button class="subtab active" id="st-prod-1" onclick="showSubtab('prod',1)" style="flex:1;padding:5px;border-radius:6px;border:1px solid var(--border);background:var(--accent);color:#0d0f14;font-family:Syne,sans-serif;font-weight:700;font-size:11px;cursor:pointer;">Individual</button>
+        <button class="subtab" id="st-prod-2" onclick="showSubtab('prod',2)" style="flex:1;padding:5px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--muted);font-family:Syne,sans-serif;font-weight:700;font-size:11px;cursor:pointer;">Masivo</button>
       </div>
-      <div class="fr2">
-        <div><label>Inventario WMS</label><input type="number" id="np-inv" placeholder="0" min="0"></div>
-        <div><label>Costo Inicial</label><input type="number" id="np-costo" placeholder="0" min="0"></div>
+
+      <!-- Individual -->
+      <div id="prod-panel-1">
+        <p class="tip">Solo para referencias que aún no existen en el Maestro.</p>
+        <div class="fr"><label>Referencia 1 *</label><input type="text" id="np-ref1" placeholder="ESS-XXXX"></div>
+        <div class="fr"><label>Referencia 2</label><input type="text" id="np-ref2" placeholder="Opcional"></div>
+        <div class="fr"><label>Descripción *</label><input type="text" id="np-desc" placeholder="Nombre del producto"></div>
+        <div class="fr2">
+          <div><label>Categoría</label><input type="text" id="np-cat" placeholder="PAPEL" list="cat-dl"><datalist id="cat-dl"></datalist></div>
+          <div><label>Subcategoría</label><input type="text" id="np-sub" placeholder="FASTDRY"></div>
+        </div>
+        <div class="fr2">
+          <div><label>Inventario WMS</label><input type="number" id="np-inv" placeholder="0" min="0"></div>
+          <div><label>Costo Inicial</label><input type="number" id="np-costo" placeholder="0" min="0"></div>
+        </div>
+        <button class="btn btn-primary" id="btn-addprod" onclick="agregarProducto()">+ Guardar en Sheets</button>
       </div>
-      <button class="btn btn-primary" id="btn-addprod" onclick="agregarProducto()">+ Guardar en Sheets</button>
+
+      <!-- Masivo -->
+      <div id="prod-panel-2" style="display:none">
+        <p class="tip">Pega desde Excel hasta <b style="color:var(--accent)">8 columnas</b>:</p>
+        <div style="font-size:10px;color:var(--muted);margin-bottom:6px;font-family:DM Mono,monospace;line-height:1.7;">
+          Ref1 · Ref2 · Descripción · Categoría<br>
+          Subcategoría · Inv · Costo · Fecha<br>
+          <span style="color:var(--warn)">(Ref2, Cat, Sub, Inv, Costo y Fecha son opcionales)</span>
+        </div>
+        <textarea id="prod-masivo-paste" rows="8" style="resize:vertical;font-size:11px;" placeholder="Pega aquí desde Excel..."></textarea>
+        <div id="prod-masivo-preview" style="display:none;margin:8px 0;max-height:120px;overflow-y:auto;"></div>
+        <button class="btn btn-ghost btn-sm" style="width:100%;margin-bottom:8px;" onclick="previewMasivoProd()">👁 Vista previa</button>
+        <button class="btn btn-primary" id="btn-masivo-prod" onclick="agregarProductoMasivo()">+ Guardar todos en Sheets</button>
+      </div>
     </div>
 
     <div id="tab-isupport" class="sidebar-section" style="display:none">
@@ -550,18 +596,187 @@ async function procesarISupport() {
     .map(function(l){ var c=l.split('\t'); return {code:(c[0]||'').trim(), total:parseFloat((c[2]||c[1]||'0').trim())||0}; })
     .filter(function(r){ return r.code && r.code.toLowerCase()!=='codigo'; });
   if (!rows.length) return toast('No se encontraron filas válidas','err');
-  setBtn('btn-sync',true,'Sincronizando...');
+
+  // Enviar en lotes de 50 para no superar el límite de URL
+  var BATCH = 50;
+  var totalUpdated = 0, totalNotFound = 0;
+  var batches = [];
+  for (var i=0; i<rows.length; i+=BATCH) batches.push(rows.slice(i,i+BATCH));
+
+  setBtn('btn-sync',true,'Sincronizando 0/'+batches.length+'...');
   try {
-    var r = await jsonpCall({ action:'syncInventory', rows:JSON.stringify(rows) });
-    if (r.ok) {
-      toast(r.updated+' inventarios actualizados','ok');
-      addLog('iSupport: '+r.updated+' OK, '+r.notFound+' no encontrados','ok');
-      await loadAll();
-    } else toast(r.msg||'Error','err');
+    for (var b=0; b<batches.length; b++) {
+      setBtn('btn-sync',true,'Lote '+(b+1)+'/'+batches.length+'...');
+      var r = await jsonpCall({ action:'syncInventory', rows:JSON.stringify(batches[b]) });
+      if (r.ok) { totalUpdated+=r.updated; totalNotFound+=r.notFound; }
+      else { toast('Error en lote '+(b+1)+': '+(r.msg||''),'err'); break; }
+    }
+    toast(totalUpdated+' inventarios actualizados','ok');
+    addLog('iSupport: '+totalUpdated+' OK, '+totalNotFound+' no encontrados','ok');
+    await loadAll();
   } catch(e) { toast(e.message,'err'); }
   setBtn('btn-sync',false,'↻ Sincronizar con Sheets');
 }
 
+
+
+// ══════════════════════════════════════════
+//  SUBTABS
+// ══════════════════════════════════════════
+function showSubtab(prefix, num) {
+  [1,2].forEach(function(n){
+    var panel = document.getElementById(prefix+'-panel-'+n);
+    var btn   = document.getElementById('st-'+prefix+'-'+n);
+    if (!panel||!btn) return;
+    panel.style.display = n===num ? '' : 'none';
+    if (n===num) {
+      btn.style.background = 'var(--accent)'; btn.style.color='#0d0f14';
+    } else {
+      btn.style.background = 'transparent'; btn.style.color='var(--muted)';
+    }
+  });
+}
+
+// ══════════════════════════════════════════
+//  MASIVO — NUEVA ORDEN
+// ══════════════════════════════════════════
+function parseMasivoOrden() {
+  var text = document.getElementById('ord-masivo-paste').value.trim();
+  if (!text) return [];
+  return text.split('\n').filter(function(l){ return l.trim(); }).map(function(l){
+    var c = l.split('\t');
+    return {
+      ref1:    (c[0]||'').trim(),
+      qty:     parseFloat((c[1]||'0').replace(/[^0-9.]/g,''))||0,
+      newCost: parseFloat((c[2]||'0').replace(/[^0-9.]/g,''))||0
+    };
+  }).filter(function(r){ return r.ref1 && r.qty>0 && r.newCost>0; });
+}
+
+function previewMasivoOrden() {
+  var rows = parseMasivoOrden();
+  var el   = document.getElementById('ord-masivo-preview');
+  if (!rows.length) { el.style.display='none'; return toast('No se encontraron filas válidas. Verifica el formato.','err'); }
+  var html = '<div style="font-size:10px;color:var(--muted);margin-bottom:4px;">'+rows.length+' órdenes detectadas:</div>';
+  html += '<table style="width:100%;font-size:10px;font-family:DM Mono,monospace;">';
+  html += '<tr style="color:var(--muted)"><td>Referencia</td><td>Cant</td><td>Costo</td><td>¿Existe?</td></tr>';
+  rows.forEach(function(r){
+    var existe = products.find(function(p){ return p.ref1.toLowerCase()===r.ref1.toLowerCase(); });
+    html += '<tr style="border-top:1px solid var(--border)">'+
+      '<td style="color:var(--text)">'+esc(r.ref1)+'</td>'+
+      '<td>'+fmt(r.qty)+'</td>'+
+      '<td>$'+fmt(r.newCost)+'</td>'+
+      '<td style="color:'+(existe?'var(--accent)':'var(--danger)')+'">'+
+        (existe?'✓':'✗ No existe')+'</td></tr>';
+  });
+  html += '</table>';
+  el.innerHTML = html; el.style.display='';
+}
+
+async function aplicarOrdenMasivo() {
+  if (!connected) return toast('Primero conecta con Google Sheets','err');
+  var rows = parseMasivoOrden();
+  if (!rows.length) return toast('No hay filas válidas','err');
+  // Verificar que existan
+  var noExisten = rows.filter(function(r){
+    return !products.find(function(p){ return p.ref1.toLowerCase()===r.ref1.toLowerCase(); });
+  });
+  if (noExisten.length) {
+    if (!confirm(noExisten.length+' referencia(s) no existen en el Maestro:\n'+
+      noExisten.map(function(r){return r.ref1;}).join(', ')+'\n\n¿Continuar solo con las que existen?')) return;
+    rows = rows.filter(function(r){
+      return products.find(function(p){ return p.ref1.toLowerCase()===r.ref1.toLowerCase(); });
+    });
+    if (!rows.length) return toast('No quedan referencias válidas','err');
+  }
+  setBtn('btn-masivo-orden',true,'Procesando 0/'+rows.length+'...');
+  var ok=0, err=0;
+  for (var i=0; i<rows.length; i++) {
+    setBtn('btn-masivo-orden',true,'Procesando '+(i+1)+'/'+rows.length+'...');
+    try {
+      var r = await jsonpCall({ action:'updateCost', ref1:rows[i].ref1, qty:rows[i].qty, newCost:rows[i].newCost });
+      if (r.ok) ok++; else err++;
+    } catch(e) { err++; }
+  }
+  toast(ok+' órdenes actualizadas'+(err?' ('+err+' errores)':''),'ok');
+  addLog('Masivo órdenes: '+ok+' OK, '+err+' errores','ok');
+  await loadAll();
+  document.getElementById('ord-masivo-paste').value='';
+  document.getElementById('ord-masivo-preview').style.display='none';
+  setBtn('btn-masivo-orden',false,'✓ Actualizar todos en Sheets');
+}
+
+// ══════════════════════════════════════════
+//  MASIVO — NUEVO PRODUCTO
+// ══════════════════════════════════════════
+function parseMasivoProd() {
+  var text = document.getElementById('prod-masivo-paste').value.trim();
+  if (!text) return [];
+  return text.split('\n').filter(function(l){ return l.trim(); }).map(function(l){
+    var c = l.split('\t');
+    return {
+      ref1:  (c[0]||'').trim(),
+      ref2:  (c[1]||'').trim(),
+      desc:  (c[2]||'').trim(),
+      cat:   (c[3]||'').trim().toUpperCase(),
+      sub:   (c[4]||'').trim().toUpperCase(),
+      inv:   parseFloat((c[5]||'0').replace(/[^0-9.]/g,''))||0,
+      costo: parseFloat((c[6]||'0').replace(/[^0-9.]/g,''))||0
+    };
+  }).filter(function(r){ return r.ref1 && r.desc; });
+}
+
+function previewMasivoProd() {
+  var rows = parseMasivoProd();
+  var el   = document.getElementById('prod-masivo-preview');
+  if (!rows.length) { el.style.display='none'; return toast('No se encontraron filas. Verifica que tengas al menos Ref1 y Descripción.','err'); }
+  var html = '<div style="font-size:10px;color:var(--muted);margin-bottom:4px;">'+rows.length+' productos detectados:</div>';
+  html += '<table style="width:100%;font-size:10px;font-family:DM Mono,monospace;">';
+  html += '<tr style="color:var(--muted)"><td>Referencia</td><td>Descripción</td><td>¿Duplicado?</td></tr>';
+  rows.forEach(function(r){
+    var dup = products.find(function(p){ return p.ref1.toLowerCase()===r.ref1.toLowerCase(); });
+    html += '<tr style="border-top:1px solid var(--border)">'+
+      '<td style="color:var(--text)">'+esc(r.ref1)+'</td>'+
+      '<td style="max-width:100px;overflow:hidden;text-overflow:ellipsis;">'+esc(r.desc.substring(0,25))+'</td>'+
+      '<td style="color:'+(dup?'var(--danger)':'var(--accent)')+'">'+
+        (dup?'✗ Ya existe':'✓ Nuevo')+'</td></tr>';
+  });
+  html += '</table>';
+  el.innerHTML = html; el.style.display='';
+}
+
+async function agregarProductoMasivo() {
+  if (!connected) return toast('Primero conecta con Google Sheets','err');
+  var rows = parseMasivoProd();
+  if (!rows.length) return toast('No hay filas válidas','err');
+  var duplicados = rows.filter(function(r){
+    return products.find(function(p){ return p.ref1.toLowerCase()===r.ref1.toLowerCase(); });
+  });
+  if (duplicados.length) {
+    if (!confirm(duplicados.length+' referencia(s) ya existen:\n'+
+      duplicados.map(function(r){return r.ref1;}).join(', ')+'\n\n¿Continuar solo con las nuevas?')) return;
+    rows = rows.filter(function(r){
+      return !products.find(function(p){ return p.ref1.toLowerCase()===r.ref1.toLowerCase(); });
+    });
+    if (!rows.length) return toast('Todos los productos ya existen','err');
+  }
+  setBtn('btn-masivo-prod',true,'Guardando 0/'+rows.length+'...');
+  var ok=0, err=0;
+  for (var i=0; i<rows.length; i++) {
+    setBtn('btn-masivo-prod',true,'Guardando '+(i+1)+'/'+rows.length+'...');
+    try {
+      var r = await jsonpCall({ action:'addProduct', ref1:rows[i].ref1, ref2:rows[i].ref2,
+        desc:rows[i].desc, cat:rows[i].cat, sub:rows[i].sub, inv:rows[i].inv, costo:rows[i].costo });
+      if (r.ok) ok++; else err++;
+    } catch(e) { err++; }
+  }
+  toast(ok+' productos guardados'+(err?' ('+err+' errores)':''),'ok');
+  addLog('Masivo productos: '+ok+' guardados, '+err+' errores','ok');
+  await loadAll();
+  document.getElementById('prod-masivo-paste').value='';
+  document.getElementById('prod-masivo-preview').style.display='none';
+  setBtn('btn-masivo-prod',false,'+ Guardar todos en Sheets');
+}
 
 // ══════════════════════════════════════════
 //  SORT & MONTH FILTER
