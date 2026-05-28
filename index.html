@@ -1160,9 +1160,9 @@ var USERS = {
 //   viewer    → clave456
 
 var ROLE_PERMS = {
-  admin:    { orden: true,  producto: true,  isupport: true,  export: true  },
-  operador: { orden: true,  producto: false, isupport: true,  export: true  },
-  viewer:   { orden: false, producto: false, isupport: false, export: true  }
+  admin:    { orden: true,  producto: true,  isupport: true,  export: true,  historial: true },
+  operador: { orden: true,  producto: true,  isupport: true,  export: true,  historial: true },
+  viewer:   { orden: false, producto: false, isupport: false, export: true,  historial: false },
 };
 
 var currentUser   = null;
@@ -1304,7 +1304,7 @@ function applyPermissions() {
     if (tabIS) { tabIS.style.opacity='.35'; tabIS.style.pointerEvents='none'; tabIS.title='Sin permiso'; }
     if (secIS) secIS.classList.add('role-locked');
   }
-  var btnCSV = document.querySelector('.btn-ghost[onclick*="exportCSV"]');
+  var tabHist = document.querySelector('.tab[onclick*="historial"]');   var secHist = document.getElementById('tab-historial');   if (!perms.historial) {     if (tabHist) { tabHist.style.opacity='.35'; tabHist.style.pointerEvents='none'; tabHist.title='Sin permiso'; }     if (secHist) secHist.classList.add('role-locked');   }   var btnCSV = document.querySelector('.btn-ghost[onclick*="exportCSV"]');
   if (!perms.export && btnCSV) btnCSV.style.display='none';
 }
 
