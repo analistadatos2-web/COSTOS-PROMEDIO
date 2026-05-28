@@ -226,6 +226,7 @@ tr:hover td{background:rgba(255,255,255,.02);}
       <button class="tab active" onclick="showTab('orden')">Nueva Orden</button>
       <button class="tab" onclick="showTab('producto')">Producto</button>
       <button class="tab" onclick="showTab('isupport')">iSupport</button>
+      <button class="tab" onclick="showTab('historial')">&#x21A9; Versiones</button>
     </div>
 
     <div id="tab-orden" class="sidebar-section">
@@ -330,6 +331,18 @@ tr:hover td{background:rgba(255,255,255,.02);}
       <textarea id="isupp-paste" rows="7" style="resize:vertical;font-size:11px;" placeholder="CODIGO&#9;DESCRIPCIÓN&#9;Total&#10;ESS-120ML&#9;FRASCO DE TINTA&#9;609"></textarea>
       <button class="btn btn-primary" style="margin-top:9px;" id="btn-sync" onclick="procesarISupport()">↻ Sincronizar con Sheets</button>
     </div>
+
+    <div id="tab-historial" class="sidebar-section" style="display:none">
+      <h2>Restaurar Versión</h2>
+      <p class="tip">Muestra las últimas 2 fechas de actualización. Restaura todos los costos al estado que tenían <b style="color:var(--text)">antes</b> de esa fecha.</p>
+      <button class="btn btn-ghost" style="width:100%;margin-bottom:14px;" onclick="loadHistorial()">&#x21BB; Cargar versiones disponibles</button>
+      <div id="historial-panel">
+        <div class="empty" style="padding:20px 10px;">
+          <div class="ico" style="font-size:24px;">&#128194;</div>
+          <p>Haz clic en "Cargar versiones"</p>
+        </div>
+      </div>
+    </div>
   </div>
 
   <div class="content">
@@ -404,6 +417,22 @@ tr:hover td{background:rgba(255,255,255,.02);}
   </div>
 </div>
 <div class="toast" id="toast"></div>
+
+<!-- ══ MODAL CONFIRMAR RESTAURACIÓN ══ -->
+<div class="modal-bg" id="confirm-restore-modal">
+  <div class="modal" style="max-width:420px;">
+    <h3>&#9888;&#65039; Confirmar restauración</h3>
+    <input type="hidden" id="cr-date">
+    <p style="font-size:12px;line-height:1.7;color:var(--muted);margin-bottom:12px;">
+      Estás a punto de restaurar todos los productos actualizados el <b id="cr-label" style="color:var(--text)"></b> o después, al estado que tenían <b style="color:var(--accent)">justo antes</b> de esa fecha.
+    </p>
+    <p style="font-size:11px;color:var(--warn);margin-bottom:6px;">Esta acción no se puede deshacer.</p>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeRestoreModal()">Cancelar</button>
+      <button class="btn btn-primary" style="width:auto;background:var(--warn);color:#0d0f14;" onclick="executeRestore()">&#x21A9; Sí, restaurar</button>
+    </div>
+  </div>
+</div>
 
 </div><!-- /app -->
 
@@ -1033,12 +1062,72 @@ function setBtn(id,loading,txt){
   btn.innerHTML=loading?'<span class="spinner"></span> '+txt:txt;
 }
 function showTab(t){
-  ['orden','producto','isupport'].forEach(function(id){
+  ['orden','producto','isupport','historial'].forEach(function(id){
     document.getElementById('tab-'+id).style.display=id===t?'':'none';
   });
   document.querySelectorAll('.tab').forEach(function(el,i){
-    el.classList.toggle('active',['orden','producto','isupport'][i]===t);
+    el.classList.toggle('active',['orden','producto','isupport','historial'][i]===t);
   });
+  if(t==='historial') loadHistorial();
+}
+
+// ══ HISTORIAL / VERSIONES ══
+var MONTHS_ES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+
+async function loadHistorial() {
+  if (!connected) return toast('Primero conecta con Google Sheets','err');
+  var panel = document.getElementById('historial-panel');
+  panel.innerHTML = '<div class="empty" style="padding:20px 10px;"><div class="ico">&#9203;</div><p>Cargando versiones...</p></div>';
+  try {
+    var r = await jsonpCall({ action:'getHistorialDates' });
+    if (!r.ok) { panel.innerHTML='<div class="empty"><p>'+(r.msg||'Error')+'</p></div>'; return; }
+    renderHistorial(r.dates||[]);
+  } catch(e) { panel.innerHTML='<div class="empty"><p>Error al cargar</p></div>'; }
+}
+
+function renderHistorial(dates) {
+  var panel = document.getElementById('historial-panel');
+  if (!dates.length) {
+    panel.innerHTML='<div class="empty" style="padding:20px 10px;"><div class="ico" style="font-size:24px;">&#128235;</div><p>Sin versiones aún.<br><span style="font-size:10px;">Se crean automáticamente cada vez que se actualiza un costo.</span></p></div>';
+    return;
+  }
+  var labels=['Última actualización','Actualización anterior'];
+  var html='';
+  dates.forEach(function(d,i){
+    var p=d.split('-'); // YYYY-MM-DD
+    var label=parseInt(p[2])+' de '+MONTHS_ES[parseInt(p[1])-1]+' '+p[0];
+    html+='<div style="background:var(--surface2);border:1px solid var(--border);border-radius:9px;padding:12px 14px;margin-bottom:10px;">';
+    html+='<div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.8px;margin-bottom:4px;">'+labels[i]||'Versión '+(i+1)+'</div>';
+    html+='<div style="font-size:14px;font-weight:700;margin-bottom:8px;">'+label+'</div>';
+    html+='<div style="font-size:10px;color:var(--muted);margin-bottom:10px;">Restaura los productos actualizados el <b style="color:var(--text)">'+label+'</b> o después al estado anterior.</div>';
+    html+='<button class="btn btn-ghost" style="width:100%;border-color:var(--warn);color:var(--warn);" onclick="confirmRestore(\''+d+'\',\''+label+'\')">&#x21A9; Restaurar a antes del '+label+'</button>';
+    html+='</div>';
+  });
+  panel.innerHTML=html;
+}
+
+function confirmRestore(dateKey,label){
+  document.getElementById('cr-label').textContent=label;
+  document.getElementById('cr-date').value=dateKey;
+  document.getElementById('confirm-restore-modal').classList.add('open');
+}
+function closeRestoreModal(){
+  document.getElementById('confirm-restore-modal').classList.remove('open');
+}
+async function executeRestore(){
+  var dateKey=document.getElementById('cr-date').value;
+  closeRestoreModal();
+  if(!connected) return toast('Sin conexión','err');
+  toast('Restaurando...','ok');
+  try {
+    var r=await jsonpCall({ action:'restoreToDate', date:dateKey });
+    if(r.ok){
+      toast('✓ '+r.restored+' producto(s) restaurados','ok');
+      addLog('↩ Restauración: '+r.restored+' productos al estado previo al '+dateKey,'ok');
+      await loadAll();
+      loadHistorial();
+    } else toast(r.msg||'Error al restaurar','err');
+  } catch(e){ toast('Error: '+e.message,'err'); }
 }
 
 document.getElementById('edit-modal').addEventListener('click',function(e){
