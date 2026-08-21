@@ -659,14 +659,35 @@ async function procesarISupport() {
   if (!connected) return toast('Primero conecta con Google Sheets','err');
   var text=document.getElementById('isupp-paste').value.trim();
   if (!text) return toast('No hay datos','err');
-  var rows=text.split('\n').filter(function(l){ return l.trim(); })
+  var parsed=text.split('\n').filter(function(l){ return l.trim(); })
     .map(function(l){ var c=l.split('\t'); return {code:(c[0]||'').trim(), total:parseFloat((c[2]||c[1]||'0').trim())||0}; })
     .filter(function(r){ return r.code && r.code.toLowerCase()!=='codigo'; });
-  if (!rows.length) return toast('No se encontraron filas válidas','err');
+  if (!parsed.length) return toast('No se encontraron filas válidas','err');
+
+  // Un mismo producto puede tener Referencia 1 y Referencia 2 como códigos
+  // distintos dentro del reporte (ej. código propio + código de proveedor
+  // para el mismo ítem físico). Como el cargue se manda al backend en lotes
+  // separados, si esos dos códigos cayeran en lotes distintos el segundo
+  // pisaría al primero. Por eso agrupamos y sumamos aquí, usando la lista
+  // completa de productos ya cargada, ANTES de dividir en lotes.
+  var codeToRef1 = {};
+  products.forEach(function(p){
+    if (p.ref1) codeToRef1[p.ref1.toLowerCase()] = p.ref1;
+    if (p.ref2) codeToRef1[p.ref2.toLowerCase()] = p.ref1;
+  });
+  var agrupado = {}; // ref1 canónico -> total acumulado
+  var clientNotFound = 0;
+  parsed.forEach(function(r){
+    var canon = codeToRef1[r.code.toLowerCase()];
+    if (!canon) { clientNotFound++; return; }
+    agrupado[canon] = (agrupado[canon] || 0) + r.total;
+  });
+  var rows = Object.keys(agrupado).map(function(ref1){ return { code: ref1, total: agrupado[ref1] }; });
+  if (!rows.length) return toast('Ninguna referencia coincide con el Maestro','err');
 
   // Enviar en lotes de 50 para no superar el límite de URL
   var BATCH = 50;
-  var totalUpdated = 0, totalNotFound = 0;
+  var totalUpdated = 0, totalNotFound = clientNotFound;
   var batches = [];
   for (var i=0; i<rows.length; i+=BATCH) batches.push(rows.slice(i,i+BATCH));
 
@@ -684,6 +705,7 @@ async function procesarISupport() {
   } catch(e) { toast(e.message,'err'); }
   setBtn('btn-sync',false,'↻ Sincronizar con Sheets');
 }
+
 
 
 
