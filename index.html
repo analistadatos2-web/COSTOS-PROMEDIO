@@ -1001,7 +1001,46 @@ function getProductMonth(p) {
 // ══════════════════════════════════════════
 //  RENDER TABLE
 // ══════════════════════════════════════════
+// Durante la migración de códigos, un mismo producto físico vive en DOS filas:
+// la vieja (código legado) y la nueva, enlazadas por Referencia 2. El backend ya
+// las mantiene al MISMO costo (doUpdateCost promedia sobre el pool combinado),
+// pero el inventario sigue repartido entre las dos. Esto marca esas filas y
+// muestra la posición combinada. Solo LEE: no altera ningún dato.
+
+// 119 filas del Maestro traen un '0' de relleno en Referencia 2; hay que ignorarlo.
+function refValida(v) {
+  var s = String(v||'').trim().toLowerCase();
+  if (!s || s==='0' || s==='-' || s==='n/a') return '';
+  return s;
+}
+
+function buildHermanos() {
+  var porRef1 = {};
+  products.forEach(function(p){ if (p.ref1) porRef1[p.ref1.toLowerCase()] = p; });
+  var h = {};
+  products.forEach(function(p){
+    var r2 = refValida(p.ref2);
+    if (!r2) return;
+    var otro = porRef1[r2];
+    if (!otro || otro === p) return;
+    h[p.ref1.toLowerCase()]    = otro;   // fila vieja -> fila nueva
+    h[otro.ref1.toLowerCase()] = p;      // fila nueva -> fila vieja
+  });
+  return h;
+}
+
+// Posición combinada de un producto y su hermano: inventario sumado y costo
+// promedio ponderado entre ambos.
+function posicionCombinada(p, hermano) {
+  var inv = (p.inv||0) + (hermano.inv||0);
+  var costo = inv > 0
+    ? ((p.inv||0)*(p.costo||0) + (hermano.inv||0)*(hermano.costo||0)) / inv
+    : (p.costo||0);
+  return { inv: inv, costo: costo };
+}
+
 function renderTable() {
+  var hermanos = buildHermanos();
   var q   = (document.getElementById('search').value||'').toLowerCase();
   var cat = document.getElementById('filter-cat').value;
   var mes = document.getElementById('filter-mes').value;
@@ -1031,20 +1070,34 @@ function renderTable() {
   hide('empty-state'); show('main-table');
   f.forEach(function(p){
     var ps  = encodeURIComponent(JSON.stringify(p));
+    var her = hermanos[p.ref1.toLowerCase()];
+    var avisoRef = '', avisoInv = '', avisoCosto = '';
+    if (her) {
+      var comb = posicionCombinada(p, her);
+      var tip = 'Este producto está en 2 filas (migración de códigos):\n'
+              + '  ' + p.ref1   + ': ' + fmt(p.inv||0)   + ' u. a $' + fmt(p.costo||0) + '\n'
+              + '  ' + her.ref1 + ': ' + fmt(her.inv||0) + ' u. a $' + fmt(her.costo||0) + '\n'
+              + 'Posición combinada: ' + fmt(comb.inv) + ' u. a $' + fmt(Math.round(comb.costo));
+      avisoRef = ' <span title="'+esc(tip)+'" style="font-size:9px;padding:1px 4px;border-radius:3px;'
+               + 'background:rgba(255,180,0,.15);color:#ffb400;cursor:help;">⚯ 2 códigos</span>';
+      avisoInv   = '<div style="font-size:9px;color:var(--muted);">Σ '+fmt(comb.inv)+'</div>';
+      avisoCosto = '<div style="font-size:9px;color:var(--muted);">Σ $'+fmt(Math.round(comb.costo))+'</div>';
+    }
     var tr  = document.createElement('tr');
     tr.innerHTML =
-      '<td><span class="mono" style="font-weight:700;">'+esc(p.ref1)+'</span></td>'+
+      '<td><span class="mono" style="font-weight:700;">'+esc(p.ref1)+'</span>'+avisoRef+'</td>'+
       '<td><span class="mono" style="color:var(--muted);font-size:10px;">'+esc(p.ref2||'—')+'</span></td>'+
       '<td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;font-size:11px;">'+esc(p.desc)+'</td>'+
       '<td>'+(p.cat?'<span class="chip chip-cat">'+esc(p.cat)+'</span>':'—')+'</td>'+
       '<td>'+(p.sub?'<span class="chip chip-sub">'+esc(p.sub)+'</span>':'—')+'</td>'+
-      '<td class="mono" style="'+((!p.inv)?'color:var(--muted)':'')+'">'+fmt(p.inv)+'</td>'+
-      '<td class="mono" style="font-weight:700;color:var(--accent);">$ '+fmt(p.costo||0)+'</td>'+
+      '<td class="mono" style="'+((!p.inv)?'color:var(--muted)':'')+'">'+fmt(p.inv)+avisoInv+'</td>'+
+      '<td class="mono" style="font-weight:700;color:var(--accent);">$ '+fmt(p.costo||0)+avisoCosto+'</td>'+
       '<td style="font-size:10px;color:var(--muted);">'+esc(p.fecha||'—')+'</td>'+
       '<td><button class="btn btn-ghost btn-sm" onclick="openEdit(\''+ps+'\')">✎</button></td>';
     tbody.appendChild(tr);
   });
 }
+
 
 // ══════════════════════════════════════════
 //  STATS & FILTERS
