@@ -452,13 +452,16 @@ var sortDir   = 1; // 1 asc, -1 desc
 //  JSONP
 // ══════════════════════════════════════════
 let _cbId = 0;
-function jsonpCall(params) {
+// timeoutMs: el backend puede esperar hasta 10s por el candado (LockService) antes
+// siquiera de empezar a escribir. Un lote de 50 filas encima puede pasarse de 15s,
+// así que las operaciones pesadas piden más margen.
+function jsonpCall(params, timeoutMs) {
   return new Promise(function(resolve, reject) {
     var name  = '__asCb' + (++_cbId);
     var sid   = '_sc_' + name;
     var timer = setTimeout(function() {
       cleanup(); reject(new Error('Timeout. Verifica que el script esté publicado.'));
-    }, 15000);
+    }, timeoutMs || 15000);
     function cleanup() {
       clearTimeout(timer);
       delete window[name];
@@ -694,6 +697,7 @@ async function procesarISupport() {
     .map(function(l){ var c=l.split('\t'); return {code:(c[0]||'').trim(), total:parseFloat((c[2]||c[1]||'0').trim())||0}; })
     .filter(function(r){ return r.code && r.code.toLowerCase()!=='codigo'; });
   if (!parsed.length) return toast('No se encontraron filas válidas','err');
+
   // La agrupación de abajo necesita el Maestro cargado en memoria. Si el
   // usuario entró directo a sincronizar sin que se cargara la lista, la
   // recargamos antes de continuar (si no, todas las filas quedarían sin
@@ -706,6 +710,7 @@ async function procesarISupport() {
     setBtn('btn-sync',false,'↻ Sincronizar con Sheets');
     return toast('No se pudo cargar el Maestro. Usa "Recargar" e intenta de nuevo.','err');
   }
+
   // Un mismo producto puede tener Referencia 1 y Referencia 2 como códigos
   // distintos dentro del reporte (ej. código propio + código de proveedor
   // para el mismo ítem físico). Como el cargue se manda al backend en lotes
@@ -715,13 +720,18 @@ async function procesarISupport() {
   var codeToRef1 = {};
   products.forEach(function(p){
     if (p.ref1) codeToRef1[p.ref1.toLowerCase()] = p.ref1;
-    if (p.ref2) codeToRef1[p.ref2.toLowerCase()] = p.ref1;
+    // refValida descarta el '0' de relleno que traen 119 filas en Referencia 2.
+    // Sin esto, codeToRef1['0'] apuntaba a un producto cualquiera y cualquier
+    // línea del reporte con código vacío o '0' le sumaba su cantidad.
+    var r2 = refValida(p.ref2);
+    if (r2) codeToRef1[r2] = p.ref1;
   });
   var agrupado = {}; // ref1 canónico -> total acumulado
   var clientNotFound = 0;
+  var codigosNoEncontrados = []; // para poder decir CUÁLES, no solo cuántos
   parsed.forEach(function(r){
     var canon = codeToRef1[r.code.toLowerCase()];
-    if (!canon) { clientNotFound++; return; }
+    if (!canon) { clientNotFound++; codigosNoEncontrados.push(r.code); return; }
     agrupado[canon] = (agrupado[canon] || 0) + r.total;
   });
   var rows = Object.keys(agrupado).map(function(ref1){ return { code: ref1, total: agrupado[ref1] }; });
@@ -733,20 +743,47 @@ async function procesarISupport() {
   var batches = [];
   for (var i=0; i<rows.length; i+=BATCH) batches.push(rows.slice(i,i+BATCH));
 
+  // Antes, si un solo lote fallaba o se pasaba del timeout, la excepción salía del
+  // ciclo y los lotes restantes NUNCA se enviaban: esos códigos se quedaban con su
+  // valor anterior, en silencio, y ni siquiera se escribía la línea del log (estaba
+  // después del for). Ahora cada lote se maneja por separado, se reintenta, y el
+  // resumen se escribe siempre — con los códigos que no se pudieron actualizar.
   setBtn('btn-sync',true,'Sincronizando 0/'+batches.length+'...');
-  try {
-    for (var b=0; b<batches.length; b++) {
-      setBtn('btn-sync',true,'Lote '+(b+1)+'/'+batches.length+'...');
-      var r = await jsonpCall({ action:'syncInventory', rows:JSON.stringify(batches[b]) });
-      if (r.ok) { totalUpdated+=r.updated; totalNotFound+=r.notFound; }
-      else { toast('Error en lote '+(b+1)+': '+(r.msg||''),'err'); break; }
+  var lotesFallidos = [], refsSinActualizar = [];
+  for (var b=0; b<batches.length; b++) {
+    var ok = false, ultErr = '';
+    for (var intento=1; intento<=3 && !ok; intento++) {
+      setBtn('btn-sync',true,'Lote '+(b+1)+'/'+batches.length+(intento>1?' (reintento '+(intento-1)+')':'')+'...');
+      try {
+        // 45s: un lote de 50 filas más la espera del candado se pasa de los 15s por defecto.
+        var r = await jsonpCall({ action:'syncInventory', rows:JSON.stringify(batches[b]) }, 45000);
+        if (r.ok) { totalUpdated+=r.updated; totalNotFound+=r.notFound; ok=true; }
+        else ultErr = r.msg || 'error';
+      } catch(e) { ultErr = e.message; }
     }
-    toast(totalUpdated+' inventarios actualizados','ok');
-    addLog('iSupport: '+totalUpdated+' OK, '+totalNotFound+' no encontrados','ok');
-    await loadAll();
-  } catch(e) { toast(e.message,'err'); }
+    if (!ok) {
+      lotesFallidos.push(b+1);
+      batches[b].forEach(function(x){ refsSinActualizar.push(x.code); });
+      addLog('✗ Lote '+(b+1)+' falló tras 3 intentos: '+ultErr,'err');
+    }
+  }
+
+  toast(totalUpdated+' inventarios actualizados'+(lotesFallidos.length?' — '+refsSinActualizar.length+' SIN actualizar':''),
+        lotesFallidos.length?'err':'ok');
+  addLog('iSupport: '+totalUpdated+' OK, '+totalNotFound+' no encontrados'
+         +(lotesFallidos.length?', '+refsSinActualizar.length+' sin actualizar (lotes '+lotesFallidos.join(', ')+')':''),
+         lotesFallidos.length?'err':'ok');
+
+  // Decir CUÁLES quedaron por fuera, no solo cuántos.
+  if (refsSinActualizar.length)
+    addLog('Sin actualizar: '+refsSinActualizar.slice(0,40).join(', ')+(refsSinActualizar.length>40?' …(+'+(refsSinActualizar.length-40)+')':''),'err');
+  if (codigosNoEncontrados.length)
+    addLog('No existen en el Maestro: '+codigosNoEncontrados.slice(0,40).join(', ')+(codigosNoEncontrados.length>40?' …(+'+(codigosNoEncontrados.length-40)+')':''),'err');
+
+  try { await loadAll(); } catch(e) { toast('Sincronizado, pero no se pudo recargar la tabla','err'); }
   setBtn('btn-sync',false,'↻ Sincronizar con Sheets');
 }
+
 
 
 
@@ -1138,23 +1175,68 @@ function closeModal(){ document.getElementById('edit-modal').classList.remove('o
 
 async function saveEdit(){
   if (!connected) return toast('Sin conexión','err');
+  var datos = {
+    action:'updateProduct',
+    ref1:  document.getElementById('em-orig').value,
+    ref2:  document.getElementById('em-ref2').value,
+    desc:  document.getElementById('em-desc').value,
+    cat:   document.getElementById('em-cat').value.toUpperCase(),
+    sub:   document.getElementById('em-sub').value.toUpperCase(),
+    inv:   parseFloat(document.getElementById('em-inv').value)||0,
+    costo: parseFloat(document.getElementById('em-costo').value)||0
+  };
+
+  // updateProduct escribe valores fijos (no suma), así que reintentar es seguro:
+  // aplicarlo dos veces deja exactamente el mismo resultado. Por eso aquí sí se
+  // puede reintentar solo, a diferencia de updateCost, que duplicaría inventario.
   setBtn('btn-save-edit',true,'Guardando...');
-  try {
-    var r = await jsonpCall({
-      action:'updateProduct',
-      ref1:  document.getElementById('em-orig').value,
-      ref2:  document.getElementById('em-ref2').value,
-      desc:  document.getElementById('em-desc').value,
-      cat:   document.getElementById('em-cat').value.toUpperCase(),
-      sub:   document.getElementById('em-sub').value.toUpperCase(),
-      inv:   parseFloat(document.getElementById('em-inv').value)||0,
-      costo: parseFloat(document.getElementById('em-costo').value)||0
-    });
-    if (r.ok){ toast('Guardado ✓','ok'); closeModal(); await loadAll(); }
-    else toast(r.msg||'Error','err');
-  } catch(e){ toast(e.message,'err'); }
+  var ok=false, ultErr='';
+  for (var intento=1; intento<=3 && !ok; intento++) {
+    if (intento>1) setBtn('btn-save-edit',true,'Reintentando ('+(intento-1)+')...');
+    try {
+      var r = await jsonpCall(datos, 30000);
+      if (r.ok) ok=true; else ultErr = r.msg || 'Error';
+    } catch(e){ ultErr = e.message; }
+  }
+
+  if (ok) {
+    toast('Guardado ✓','ok');
+    addLog('✎ '+datos.ref1+' actualizado','ok');
+    closeModal();
+    await loadAll();
+  } else {
+    // Se agotaron los intentos. En vez de dejar al usuario sin saber si quedó o no,
+    // recargamos y comparamos contra lo que se envió.
+    await verificarEdicion(datos, ultErr);
+  }
   setBtn('btn-save-edit',false,'Guardar en Sheets');
 }
+
+// Tras fallar el guardado, comprueba si los datos alcanzaron a quedar en Sheets.
+async function verificarEdicion(datos, errMsg) {
+  setBtn('btn-save-edit',true,'Verificando si se guardó...');
+  try {
+    await loadAll();
+    var p = products.find(function(x){ return x.ref1.toLowerCase()===datos.ref1.toLowerCase(); });
+    var coincide = p
+      && Math.abs((p.inv||0)   - datos.inv)   < 0.001
+      && Math.abs((p.costo||0) - datos.costo) < 0.001
+      && (p.desc||'') === datos.desc;
+    if (coincide) {
+      toast('Falló la conexión, PERO los cambios SÍ quedaron guardados ✓','ok');
+      addLog('⚠ '+datos.ref1+': conexión caída, pero verificado → SÍ se guardó. No reintentar.','ok');
+      closeModal();
+    } else {
+      toast('No se guardó ('+errMsg+'). Los datos siguen en el formulario, puedes reintentar.','err');
+      addLog('✗ '+datos.ref1+': conexión caída, verificado → NO se guardó'
+             + (p ? ' (sigue en inv '+fmt(p.inv||0)+' / $'+fmt(p.costo||0)+')' : '') + '.','err');
+    }
+  } catch(e) {
+    toast(errMsg+' — tampoco se pudo verificar. Revisa la conexión.','err');
+    addLog('✗ '+datos.ref1+': conexión caída y no se pudo verificar. Revisar antes de reintentar.','err');
+  }
+}
+
 
 // ══════════════════════════════════════════
 //  EXPORT CSV
