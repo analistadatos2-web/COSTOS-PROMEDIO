@@ -663,7 +663,18 @@ async function procesarISupport() {
     .map(function(l){ var c=l.split('\t'); return {code:(c[0]||'').trim(), total:parseFloat((c[2]||c[1]||'0').trim())||0}; })
     .filter(function(r){ return r.code && r.code.toLowerCase()!=='codigo'; });
   if (!parsed.length) return toast('No se encontraron filas válidas','err');
-
+  // La agrupación de abajo necesita el Maestro cargado en memoria. Si el
+  // usuario entró directo a sincronizar sin que se cargara la lista, la
+  // recargamos antes de continuar (si no, todas las filas quedarían sin
+  // coincidencia y el cargue se abortaría sin razón real).
+  if (!products || !products.length) {
+    setBtn('btn-sync',true,'Cargando Maestro...');
+    try { await loadAll(); } catch(e) {}
+  }
+  if (!products || !products.length) {
+    setBtn('btn-sync',false,'↻ Sincronizar con Sheets');
+    return toast('No se pudo cargar el Maestro. Usa "Recargar" e intenta de nuevo.','err');
+  }
   // Un mismo producto puede tener Referencia 1 y Referencia 2 como códigos
   // distintos dentro del reporte (ej. código propio + código de proveedor
   // para el mismo ítem físico). Como el cargue se manda al backend en lotes
