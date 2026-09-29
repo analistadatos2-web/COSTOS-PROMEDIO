@@ -330,6 +330,7 @@ tr:hover td{background:rgba(255,255,255,.02);}
       <div style="margin:9px 0;text-align:center;font-size:10px;color:var(--muted);">— o pega aquí —</div>
       <textarea id="isupp-paste" rows="7" style="resize:vertical;font-size:11px;" placeholder="CODIGO&#9;DESCRIPCIÓN&#9;Total&#10;ESS-120ML&#9;FRASCO DE TINTA&#9;609"></textarea>
       <button class="btn btn-primary" style="margin-top:9px;" id="btn-sync" onclick="procesarISupport()">↻ Sincronizar con Sheets</button>
+      <button class="btn btn-ghost" style="margin-top:6px;display:none;" id="btn-no-encontrados" onclick="descargarNoEncontrados()">↓ Descargar no encontrados</button>
     </div>
 
     <div id="tab-historial" class="sidebar-section" style="display:none">
@@ -649,7 +650,6 @@ async function verificarOrden(ref, qty, invAntes, errMsg) {
   }
 }
 
-
 // ══════════════════════════════════════════
 //  AGREGAR PRODUCTO
 // ══════════════════════════════════════════
@@ -728,12 +728,16 @@ async function procesarISupport() {
   });
   var agrupado = {}; // ref1 canónico -> total acumulado
   var clientNotFound = 0;
-  var codigosNoEncontrados = []; // para poder decir CUÁLES, no solo cuántos
+  var sinMaestro = {}; // código -> cantidad, para poder decir CUÁLES, no solo cuántos
   parsed.forEach(function(r){
     var canon = codeToRef1[r.code.toLowerCase()];
-    if (!canon) { clientNotFound++; codigosNoEncontrados.push(r.code); return; }
+    if (!canon) { clientNotFound++; sinMaestro[r.code] = (sinMaestro[r.code]||0) + r.total; return; }
     agrupado[canon] = (agrupado[canon] || 0) + r.total;
   });
+  var codigosNoEncontrados = Object.keys(sinMaestro);
+  // Se guarda para el botón "Descargar no encontrados".
+  ultimoCargueNoEncontrados = codigosNoEncontrados.map(function(c){ return { code:c, total:sinMaestro[c] }; });
+  document.getElementById('btn-no-encontrados').style.display = codigosNoEncontrados.length ? '' : 'none';
   var rows = Object.keys(agrupado).map(function(ref1){ return { code: ref1, total: agrupado[ref1] }; });
   if (!rows.length) return toast('Ninguna referencia coincide con el Maestro','err');
 
@@ -777,14 +781,17 @@ async function procesarISupport() {
   // Decir CUÁLES quedaron por fuera, no solo cuántos.
   if (refsSinActualizar.length)
     addLog('Sin actualizar: '+refsSinActualizar.slice(0,40).join(', ')+(refsSinActualizar.length>40?' …(+'+(refsSinActualizar.length-40)+')':''),'err');
+  // Ojo: la mayoría de estos NO son un error. Son repuestos, hilos ESS-TH de compra
+  // local y descontinuados con costo ya definido — inventario que a propósito no se
+  // costea aquí. Por eso va en tono neutro y con el botón de descarga para revisarlos.
   if (codigosNoEncontrados.length)
-    addLog('No existen en el Maestro: '+codigosNoEncontrados.slice(0,40).join(', ')+(codigosNoEncontrados.length>40?' …(+'+(codigosNoEncontrados.length-40)+')':''),'err');
+    addLog(codigosNoEncontrados.length+' códigos del reporte no están en el Maestro '
+           +'(repuestos, hilos, descontinuados). Usa "↓ Descargar no encontrados" para revisarlos: '
+           +codigosNoEncontrados.slice(0,20).join(', ')+(codigosNoEncontrados.length>20?' …':''),'ok');
 
   try { await loadAll(); } catch(e) { toast('Sincronizado, pero no se pudo recargar la tabla','err'); }
   setBtn('btn-sync',false,'↻ Sincronizar con Sheets');
 }
-
-
 
 
 
@@ -863,7 +870,14 @@ async function aplicarOrdenMasivo() {
     setBtn('btn-masivo-orden',true,'Procesando '+(i+1)+'/'+rows.length+'...');
     try {
       var r = await jsonpCall({ action:'updateCost', ref1:rows[i].ref1, qty:rows[i].qty, newCost:rows[i].newCost });
-      if (r.ok) ok++;
+      if (r.ok) {
+        ok++;
+        // El backend relee la fecha tras escribir; si tuvo que reescribirla es la
+        // evidencia del bug del 29-sep (inventario y costo sí, fecha no).
+        if (r.fechaReescrita)
+          addLog('⚠ '+rows[i].ref1+': la fecha no quedó al primer intento (fila '+r.fila+'), se reescribió'
+                 +(r.fechaOk?' ✓':' y AÚN NO quedó — avisar'),'err');
+      }
       else { err++; fallidas.push({ref:rows[i].ref1, qty:rows[i].qty, motivo:(r.msg||'error')}); }
     } catch(e) {
       // Conexión caída: no sabemos si se aplicó. Se registra para verificar al final.
@@ -894,7 +908,6 @@ async function aplicarOrdenMasivo() {
   document.getElementById('ord-masivo-preview').style.display='none';
   setBtn('btn-masivo-orden',false,'✓ Actualizar todos en Sheets');
 }
-
 
 // ══════════════════════════════════════════
 //  MASIVO — NUEVO PRODUCTO
@@ -1135,7 +1148,6 @@ function renderTable() {
   });
 }
 
-
 // ══════════════════════════════════════════
 //  STATS & FILTERS
 // ══════════════════════════════════════════
@@ -1237,19 +1249,35 @@ async function verificarEdicion(datos, errMsg) {
   }
 }
 
-
 // ══════════════════════════════════════════
 //  EXPORT CSV
 // ══════════════════════════════════════════
+function descargarCSV(nombre, rows){
+  var csv=rows.map(function(r){ return r.map(function(v){ return '"'+String(v||'').replace(/"/g,'""')+'"'; }).join(','); }).join('\n');
+  var a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8;'}));
+  a.download=nombre+'_'+new Date().toISOString().slice(0,10)+'.csv';
+  a.click();
+}
+
 function exportCSV(){
   if (!products.length) return toast('No hay datos','err');
   var rows=[['Referencia','Referencia 2','Descripcion','Categoria','Subcategoria','Inventario WMS','Costo Promedio','Fecha']];
   products.forEach(function(p){ rows.push([p.ref1,p.ref2,p.desc,p.cat,p.sub,p.inv,p.costo,p.fecha||'']); });
-  var csv=rows.map(function(r){ return r.map(function(v){ return '"'+String(v||'').replace(/"/g,'""')+'"'; }).join(','); }).join('\n');
-  var a=document.createElement('a');
-  a.href=URL.createObjectURL(new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8;'}));
-  a.download='maestro_costos_'+new Date().toISOString().slice(0,10)+'.csv';
-  a.click();
+  descargarCSV('maestro_costos', rows);
+}
+
+// C\u00F3digos del \u00FAltimo cargue de iSupport que no existen en el Maestro. La mayor\u00EDa
+// son esperados y NO hay que crearlos (repuestos, hilos ESS-TH comprados
+// localmente, y descontinuados con costo ya definido). Se descargan para poder
+// revisarlos en Excel en vez de leerlos del log, que solo muestra los primeros 40.
+var ultimoCargueNoEncontrados = [];
+
+function descargarNoEncontrados(){
+  if (!ultimoCargueNoEncontrados.length) return toast('No hay c\u00F3digos para descargar','err');
+  var rows=[['Codigo','Cantidad en el reporte']];
+  ultimoCargueNoEncontrados.forEach(function(x){ rows.push([x.code, x.total]); });
+  descargarCSV('isupport_no_encontrados', rows);
 }
 
 // ══════════════════════════════════════════
@@ -1381,8 +1409,8 @@ var USERS = {
 //   viewer    → clave456
 
 var ROLE_PERMS = {
-  admin:    { orden: true,  producto: true,  isupport: true,  export: true,  historial: true },
-  operador: { orden: true,  producto: true,  isupport: true,  export: true,  historial: true },
+  admin:    { orden: true,  producto: true,  isupport: true,  export: true,  historial: true  },
+  operador: { orden: true,  producto: true,  isupport: true,  export: true,  historial: true  },
   viewer:   { orden: false, producto: false, isupport: false, export: true,  historial: false },
 };
 
@@ -1525,7 +1553,13 @@ function applyPermissions() {
     if (tabIS) { tabIS.style.opacity='.35'; tabIS.style.pointerEvents='none'; tabIS.title='Sin permiso'; }
     if (secIS) secIS.classList.add('role-locked');
   }
-  var tabHist = document.querySelector('.tab[onclick*="historial"]');   var secHist = document.getElementById('tab-historial');   if (!perms.historial) {     if (tabHist) { tabHist.style.opacity='.35'; tabHist.style.pointerEvents='none'; tabHist.title='Sin permiso'; }     if (secHist) secHist.classList.add('role-locked');   }   var btnCSV = document.querySelector('.btn-ghost[onclick*="exportCSV"]');
+  var tabHist = document.querySelector('.tab[onclick*="historial"]');
+  var secHist = document.getElementById('tab-historial');
+  if (!perms.historial) {
+    if (tabHist) { tabHist.style.opacity='.35'; tabHist.style.pointerEvents='none'; tabHist.title='Sin permiso'; }
+    if (secHist) secHist.classList.add('role-locked');
+  }
+  var btnCSV = document.querySelector('.btn-ghost[onclick*="exportCSV"]');
   if (!perms.export && btnCSV) btnCSV.style.display='none';
 }
 
