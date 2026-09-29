@@ -601,6 +601,11 @@ async function aplicarOrden() {
   if (!ref)   return toast('Ingresa una referencia','err');
   if (qty<=0) return toast('Cantidad debe ser mayor a 0','err');
   if (nc<=0)  return toast('Costo debe ser mayor a 0','err');
+  // Guardamos el inventario ANTES de enviar, para poder verificar después si la
+  // operación alcanzó a aplicarse en caso de que se caiga la conexión.
+  var antes = products.find(function(p){ return p.ref1.toLowerCase()===ref.toLowerCase(); });
+  var invAntes = antes ? antes.inv : null;
+
   setBtn('btn-aplicar',true,'Guardando...');
   try {
     var r = await jsonpCall({ action:'updateCost', ref1:ref, qty:qty, newCost:nc });
@@ -612,9 +617,35 @@ async function aplicarOrden() {
       document.getElementById('ord-preview').style.display='none';
       document.getElementById('ord-result').style.display='none';
     } else toast(r.msg||'Error','err');
-  } catch(e) { toast(e.message,'err'); }
+  } catch(e) {
+    // Se perdió la conexión: no sabemos si el servidor alcanzó a guardar. En vez de
+    // dejar al usuario revisando a mano en Sheets, recargamos y comparamos el
+    // inventario contra el que había antes.
+    await verificarOrden(ref, qty, invAntes, e.message);
+  }
   setBtn('btn-aplicar',false,'✓ Actualizar Costo en Sheets');
 }
+
+// Verifica si un updateCost alcanzó a aplicarse tras un fallo de conexión.
+async function verificarOrden(ref, qty, invAntes, errMsg) {
+  if (invAntes === null) { toast(errMsg+' — no se pudo verificar','err'); return; }
+  setBtn('btn-aplicar',true,'Verificando si se guardó...');
+  try {
+    await loadAll();
+    var ahora = products.find(function(p){ return p.ref1.toLowerCase()===ref.toLowerCase(); });
+    if (ahora && Math.abs(ahora.inv - (invAntes + qty)) < 0.001) {
+      toast('Se perdió la conexión, PERO la orden SÍ quedó aplicada ✓','ok');
+      addLog('⚠ '+ref+': conexión caída, pero verificado → SÍ se aplicó (inv '+fmt(invAntes)+' → '+fmt(ahora.inv)+', costo $'+fmt(ahora.costo)+'). No reenviar.','ok');
+    } else {
+      toast('Se perdió la conexión y la orden NO se aplicó. Puedes reintentar.','err');
+      addLog('✗ '+ref+': conexión caída, verificado → NO se aplicó (inv sigue en '+fmt(ahora ? ahora.inv : invAntes)+'). Se puede reintentar.','err');
+    }
+  } catch(e2) {
+    toast(errMsg+' — tampoco se pudo verificar. Revisa la conexión.','err');
+    addLog('✗ '+ref+': conexión caída y no se pudo verificar. Revisar manualmente antes de reintentar.','err');
+  }
+}
+
 
 // ══════════════════════════════════════════
 //  AGREGAR PRODUCTO
@@ -790,21 +821,43 @@ async function aplicarOrdenMasivo() {
     if (!rows.length) return toast('No quedan referencias válidas','err');
   }
   setBtn('btn-masivo-orden',true,'Procesando 0/'+rows.length+'...');
-  var ok=0, err=0;
+  var ok=0, err=0, fallidas=[];
   for (var i=0; i<rows.length; i++) {
     setBtn('btn-masivo-orden',true,'Procesando '+(i+1)+'/'+rows.length+'...');
     try {
       var r = await jsonpCall({ action:'updateCost', ref1:rows[i].ref1, qty:rows[i].qty, newCost:rows[i].newCost });
-      if (r.ok) ok++; else err++;
-    } catch(e) { err++; }
+      if (r.ok) ok++;
+      else { err++; fallidas.push({ref:rows[i].ref1, qty:rows[i].qty, motivo:(r.msg||'error')}); }
+    } catch(e) {
+      // Conexión caída: no sabemos si se aplicó. Se registra para verificar al final.
+      err++; fallidas.push({ref:rows[i].ref1, qty:rows[i].qty, motivo:'conexión perdida (estado desconocido)'});
+    }
   }
-  toast(ok+' órdenes actualizadas'+(err?' ('+err+' errores)':''),'ok');
-  addLog('Masivo órdenes: '+ok+' OK, '+err+' errores','ok');
+  toast(ok+' órdenes actualizadas'+(err?' ('+err+' con problema)':''),'ok');
+  addLog('Masivo órdenes: '+ok+' OK, '+err+' con problema','ok');
+
+  // En vez de dejar un contador de errores sin detalle, se lista cada referencia
+  // que falló y, para las que se cayó la conexión, se verifica si alcanzó a aplicarse.
+  if (fallidas.length) {
+    var invPrevios = {};
+    products.forEach(function(p){ invPrevios[p.ref1.toLowerCase()] = p.inv; });
+    await loadAll();
+    fallidas.forEach(function(f){
+      if (f.motivo.indexOf('conexión') === -1) { addLog('✗ '+f.ref+': '+f.motivo,'err'); return; }
+      var p = products.find(function(x){ return x.ref1.toLowerCase()===f.ref.toLowerCase(); });
+      var prev = invPrevios[f.ref.toLowerCase()];
+      if (p && prev !== undefined && Math.abs(p.inv - (prev + f.qty)) < 0.001)
+        addLog('⚠ '+f.ref+': conexión caída, pero verificado → SÍ se aplicó. No reenviar.','ok');
+      else
+        addLog('✗ '+f.ref+': conexión caída, verificado → NO se aplicó. Reintentar solo esta.','err');
+    });
+  }
   await loadAll();
   document.getElementById('ord-masivo-paste').value='';
   document.getElementById('ord-masivo-preview').style.display='none';
   setBtn('btn-masivo-orden',false,'✓ Actualizar todos en Sheets');
 }
+
 
 // ══════════════════════════════════════════
 //  MASIVO — NUEVO PRODUCTO
