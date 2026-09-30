@@ -1677,3 +1677,17 @@ function applyPermissions() {
 
 window.addEventListener('DOMContentLoaded', function() {
   try {
+    var s = JSON.parse(sessionStorage.getItem('costos_session') || 'null');
+    if (s && USERS[s.username] && USERS[s.username].role === s.role) {
+      currentUser = s;
+      showApp();
+      return;
+    }
+  } catch(e) {}
+  document.getElementById('login-screen').style.display = 'flex';
+  document.getElementById('app').style.display          = 'none';
+});
+</script>
+
+</body>
+</html>
