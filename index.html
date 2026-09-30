@@ -84,11 +84,12 @@ body.sin-panel .sidebar{display:none;}
   body{height:auto;min-height:100%;}
   .sidebar{border-right:0;border-bottom:1px solid var(--border);max-height:none;}
   .content{overflow:visible;}
-  .table-wrap{overflow-x:auto;}
+  .table-wrap{overflow-x:auto;max-height:60vh;}
+  .log-list{height:110px;}
 }
 
 /* ── SIDEBAR ── */
-.sidebar{background:var(--surface);border-right:1px solid var(--border);overflow-y:auto;display:flex;flex-direction:column;}
+.sidebar{background:var(--surface);border-right:1px solid var(--border);overflow-y:auto;display:flex;flex-direction:column;min-height:0;}
 .tabs{display:flex;gap:3px;padding:9px 12px;background:var(--surface2);border-bottom:1px solid var(--border);}
 .tab{padding:6px 11px;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer;border:1px solid transparent;transition:all .15s;font-family:'Syne',sans-serif;background:transparent;color:var(--muted);}
 .tab.active{background:var(--accent);color:var(--on-accent);}
@@ -127,7 +128,10 @@ select option{background:var(--surface2);}
 input[type=file]{display:none;}
 
 /* ── CONTENT ── */
-.content{overflow:hidden;display:flex;flex-direction:column;}
+/* min-height:0 es lo que permite que la tabla se encoja dentro del grid y deje
+   ver el log. Sin esto, un elemento de grid nunca baja del alto de su contenido
+   y el panel inferior termina empujado fuera de la pantalla. */
+.content{overflow:hidden;display:flex;flex-direction:column;min-height:0;}
 .stats-bar{display:flex;border-bottom:1px solid var(--border);background:var(--surface);}
 .stat{padding:9px 16px;border-right:1px solid var(--border);flex:1;}
 .stat .val{font-size:17px;font-weight:800;color:var(--accent);font-family:'DM Mono',monospace;}
@@ -153,9 +157,11 @@ tr:hover td{background:color-mix(in srgb,var(--accent) 6%,transparent);}
 .chip-sub{background:color-mix(in srgb,var(--accent2) 13%,transparent);color:var(--accent2);}
 
 /* ── LOG ── */
-.log-footer{border-top:1px solid var(--border);padding:7px 16px;background:var(--surface);}
+/* El log queda anclado abajo y no se encoge: es donde la app avisa si una orden
+   se aplicó o no, así que tiene que verse sin desplazarse hasta el final. */
+.log-footer{border-top:1px solid var(--border);padding:7px 16px;background:var(--surface);flex-shrink:0;}
 .log-hdr{font-size:9px;font-weight:700;letter-spacing:1px;color:var(--muted);text-transform:uppercase;margin-bottom:5px;display:flex;justify-content:space-between;align-items:center;}
-.log-list{max-height:60px;overflow-y:auto;}
+.log-list{height:150px;overflow-y:auto;}
 .log-item{padding:4px 9px;border-radius:5px;margin-bottom:3px;font-size:10px;font-family:'DM Mono',monospace;border-left:2px solid var(--border);background:var(--surface2);}
 .log-item.ok{border-left-color:var(--accent);}
 .log-item.err{border-left-color:var(--danger);}
@@ -1671,9 +1677,3 @@ window.addEventListener('DOMContentLoaded', function() {
     }
   } catch(e) {}
   document.getElementById('login-screen').style.display = 'flex';
-  document.getElementById('app').style.display          = 'none';
-});
-</script>
-
-</body>
-</html>
