@@ -27,7 +27,11 @@
    sobraba alto y la página se desbordaba. Con flex se ajusta sola, y además
    el zoom del usuario (html.zoom) no descuadra nada. */
 html,body{height:100%;}
-body{font-family:'Syne',sans-serif;background:var(--bg);color:var(--text);display:flex;flex-direction:column;}
+body{font-family:'Syne',sans-serif;background:var(--bg);color:var(--text);}
+/* El contenedor de alto es #app, no body: toda la app vive dentro de ese div
+   (body solo lo envuelve junto a la pantalla de login, que es fixed). Poner el
+   flex en body no llegaba hasta .main, y por eso el log quedaba fuera de vista. */
+#app{display:flex;flex-direction:column;height:100%;min-height:0;}
 
 /* ── LOGIN ── */
 #login-screen{position:fixed;inset:0;background:var(--bg);z-index:9999;display:flex;align-items:center;justify-content:center;}
@@ -81,7 +85,7 @@ body.sin-panel .sidebar{display:none;}
 @media (max-width:1250px){:root{--sidebar-w:265px;}}
 @media (max-width:980px){
   .main{grid-template-columns:1fr;min-height:0;}
-  body{height:auto;min-height:100%;}
+  #app{height:auto;min-height:100%;}
   .sidebar{border-right:0;border-bottom:1px solid var(--border);max-height:none;}
   .content{overflow:visible;}
   .table-wrap{overflow-x:auto;max-height:60vh;}
@@ -1366,7 +1370,11 @@ var zoomActual = 100;
 
 function aplicarZoom(v){
   zoomActual = Math.min(150, Math.max(60, Math.round(v/5)*5));
-  document.documentElement.style.zoom = zoomActual/100;
+  // Al 100% se quita la propiedad en vez de fijar zoom:1. Dejar el zoom activo
+  // aunque no escale nada hace que el navegador use otra ruta de cálculo de
+  // posiciones, y con elementos fixed (login, modales) los clics pueden fallar.
+  if (zoomActual === 100) document.documentElement.style.removeProperty('zoom');
+  else document.documentElement.style.zoom = zoomActual/100;
   var el = document.getElementById('zoom-val');
   if (el) el.textContent = zoomActual+'%';
   try { localStorage.setItem(LS_ZOOM, zoomActual); } catch(e) {}
@@ -1669,11 +1677,3 @@ function applyPermissions() {
 
 window.addEventListener('DOMContentLoaded', function() {
   try {
-    var s = JSON.parse(sessionStorage.getItem('costos_session') || 'null');
-    if (s && USERS[s.username] && USERS[s.username].role === s.role) {
-      currentUser = s;
-      showApp();
-      return;
-    }
-  } catch(e) {}
-  document.getElementById('login-screen').style.display = 'flex';
