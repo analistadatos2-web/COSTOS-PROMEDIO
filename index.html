@@ -401,7 +401,7 @@ tr:hover td{background:color-mix(in srgb,var(--accent) 6%,transparent);}
       <div style="margin:9px 0;text-align:center;font-size:10px;color:var(--muted);">— o pega aquí —</div>
       <textarea id="isupp-paste" rows="7" style="resize:vertical;font-size:11px;" placeholder="CODIGO&#9;DESCRIPCIÓN&#9;Total&#10;ESS-120ML&#9;FRASCO DE TINTA&#9;609"></textarea>
       <button class="btn btn-primary" style="margin-top:9px;" id="btn-sync" onclick="procesarISupport()">↻ Sincronizar con Sheets</button>
-      <button class="btn btn-ghost" style="margin-top:6px;display:none;" id="btn-no-encontrados" onclick="descargarNoEncontrados()">↓ Descargar no encontrados</button>
+      <button class="btn btn-ghost" style="margin-top:6px;display:none;" id="btn-no-encontrados" onclick="descargarNoEncontrados()">↓ Descargar para codificar (Excel)</button>
     </div>
 
     <div id="tab-historial" class="sidebar-section" style="display:none">
@@ -796,7 +796,7 @@ async function procesarISupport() {
   var text=document.getElementById('isupp-paste').value.trim();
   if (!text) return toast('No hay datos','err');
   var parsed=text.split('\n').filter(function(l){ return l.trim(); })
-    .map(function(l){ var c=l.split('\t'); return {code:(c[0]||'').trim(), total:parseFloat((c[2]||c[1]||'0').trim())||0}; })
+    .map(function(l){ var c=l.split('\t'); return {code:(c[0]||'').trim(), desc:(c[1]||'').trim(), total:parseFloat((c[2]||c[1]||'0').trim())||0}; })
     .filter(function(r){ return r.code && r.code.toLowerCase()!=='codigo'; });
   if (!parsed.length) return toast('No se encontraron filas válidas','err');
 
@@ -831,14 +831,22 @@ async function procesarISupport() {
   var agrupado = {}; // ref1 canónico -> total acumulado
   var clientNotFound = 0;
   var sinMaestro = {}; // código -> cantidad, para poder decir CUÁLES, no solo cuántos
+  var sinMaestroDesc = {}; // código -> descripción del reporte, para armar el Excel de codificación
   parsed.forEach(function(r){
     var canon = codeToRef1[r.code.toLowerCase()];
-    if (!canon) { clientNotFound++; sinMaestro[r.code] = (sinMaestro[r.code]||0) + r.total; return; }
+    if (!canon) {
+      clientNotFound++;
+      sinMaestro[r.code] = (sinMaestro[r.code]||0) + r.total;
+      if (r.desc && !sinMaestroDesc[r.code]) sinMaestroDesc[r.code] = r.desc;
+      return;
+    }
     agrupado[canon] = (agrupado[canon] || 0) + r.total;
   });
   var codigosNoEncontrados = Object.keys(sinMaestro);
-  // Se guarda para el botón "Descargar no encontrados".
-  ultimoCargueNoEncontrados = codigosNoEncontrados.map(function(c){ return { code:c, total:sinMaestro[c] }; });
+  // Se guarda para el botón "Descargar para codificar".
+  ultimoCargueNoEncontrados = codigosNoEncontrados.map(function(c){
+    return { code:c, desc:sinMaestroDesc[c] || '', total:sinMaestro[c] };
+  });
   document.getElementById('btn-no-encontrados').style.display = codigosNoEncontrados.length ? '' : 'none';
   var rows = Object.keys(agrupado).map(function(ref1){ return { code: ref1, total: agrupado[ref1] }; });
   if (!rows.length) return toast('Ninguna referencia coincide con el Maestro','err');
@@ -935,9 +943,10 @@ function previewMasivoOrden() {
   var el   = document.getElementById('ord-masivo-preview');
   if (!rows.length) { el.style.display='none'; return toast('No se encontraron filas válidas. Verifica el formato.','err'); }
   var faltan = [];
+  ordenMasivoFaltantes = [];
   var filas = rows.map(function(r){
     var existe = !!products.find(function(p){ return p.ref1.toLowerCase()===r.ref1.toLowerCase(); });
-    if (!existe) faltan.push(r.ref1);
+    if (!existe) { faltan.push(r.ref1); ordenMasivoFaltantes.push(r); }
     return '<tr class="'+(existe?'prev-ok':'prev-bad')+'">'+
       '<td>'+esc(r.ref1)+'</td>'+
       '<td class="prev-num">'+fmt(r.qty)+'</td>'+
@@ -958,7 +967,9 @@ function previewMasivoOrden() {
     html += '<div class="prev-aviso"><b>'+(faltan.length===1
               ? 'Crea primero esta referencia:'
               : 'Crea primero estas '+faltan.length+' referencias:')+'</b><br>'+
-            esc(faltan.join(', '))+'</div>';
+            esc(faltan.join(', '))+
+            '<button class="btn btn-ghost btn-sm" style="width:100%;margin-top:8px;" '+
+            'onclick="descargarFaltantesOrden()">↓ Descargar para codificar (Excel)</button></div>';
 
   el.innerHTML = html; el.style.display='';
 }
@@ -972,6 +983,7 @@ async function aplicarOrdenMasivo() {
     return !products.find(function(p){ return p.ref1.toLowerCase()===r.ref1.toLowerCase(); });
   });
   if (noExisten.length) {
+    ordenMasivoFaltantes = noExisten;
     if (!confirm(noExisten.length+' referencia(s) no existen en el Maestro:\n'+
       noExisten.map(function(r){return r.ref1;}).join(', ')+'\n\n¿Continuar solo con las que existen?')) return;
     rows = rows.filter(function(r){
@@ -1379,8 +1391,14 @@ async function verificarEdicion(datos, errMsg) {
 // ══════════════════════════════════════════
 //  EXPORT CSV
 // ══════════════════════════════════════════
-function descargarCSV(nombre, rows){
-  var csv=rows.map(function(r){ return r.map(function(v){ return '"'+String(v||'').replace(/"/g,'""')+'"'; }).join(','); }).join('\n');
+// sep: separador de columnas. Excel en español usa ';' como separador de lista,
+// así que un CSV con comas se abre con todo amontonado en una sola columna. La
+// línea 'sep=;' al inicio le dice a Excel cómo partirlo, sin importar la
+// configuración regional del equipo.
+function descargarCSV(nombre, rows, sep){
+  var d=sep||',';
+  var csv=rows.map(function(r){ return r.map(function(v){ return '"'+String(v||'').replace(/"/g,'""')+'"'; }).join(d); }).join('\n');
+  if (sep) csv='sep='+d+'\n'+csv;
   var a=document.createElement('a');
   a.href=URL.createObjectURL(new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8;'}));
   a.download=nombre+'_'+new Date().toISOString().slice(0,10)+'.csv';
@@ -1400,11 +1418,38 @@ function exportCSV(){
 // revisarlos en Excel en vez de leerlos del log, que solo muestra los primeros 40.
 var ultimoCargueNoEncontrados = [];
 
+// Referencias de la última orden masiva que todavía no existen en el Maestro.
+// Se exportan en el mismo formato del cargue de productos para no rearmarlo a mano.
+var ordenMasivoFaltantes = [];
+
+function descargarFaltantesOrden(){
+  if (!ordenMasivoFaltantes.length) return toast('No hay referencias por crear','err');
+  var rows=[['Referencia','Referencia 2','Descripcion','Categoria','Subcategoria','Inventario WMS','Costo Inicial','Fecha']];
+  ordenMasivoFaltantes.forEach(function(r){
+    // Inventario y costo van en 0 a propósito: se crea el producto vacío y
+    // después se vuelve a pasar la orden masiva. Con inventario 0 el promedio
+    // ponderado da exactamente el costo de la orden, y así la compra sí queda
+    // registrada en el Historial. Si se crearan ya con la cantidad y el costo,
+    // volver a aplicar la orden duplicaría el inventario.
+    rows.push([r.ref1, '', '', '', '', 0, 0, '']);
+  });
+  descargarCSV('referencias_por_codificar', rows, ';');
+  toast('Faltan las descripciones: complétalas en Excel y pega en Producto → Masivo','ok');
+}
+
+// El archivo sale con las MISMAS 8 columnas, en el mismo orden, que espera el
+// cargue masivo de productos. Así se completa en Excel lo que falta (Categoría,
+// Subcategoría, Costo) y el bloque se pega directo en la app, sin reordenar
+// nada. La cantidad del reporte ya viene puesta como Inventario WMS.
 function descargarNoEncontrados(){
   if (!ultimoCargueNoEncontrados.length) return toast('No hay c\u00F3digos para descargar','err');
-  var rows=[['Codigo','Cantidad en el reporte']];
-  ultimoCargueNoEncontrados.forEach(function(x){ rows.push([x.code, x.total]); });
-  descargarCSV('isupport_no_encontrados', rows);
+  var rows=[['Referencia','Referencia 2','Descripcion','Categoria','Subcategoria','Inventario WMS','Costo Inicial','Fecha']];
+  ultimoCargueNoEncontrados.sort(function(a,b){ return a.code.localeCompare(b.code); });
+  ultimoCargueNoEncontrados.forEach(function(x){
+    rows.push([x.code, '', x.desc, '', '', x.total, '', '']);
+  });
+  descargarCSV('referencias_por_codificar', rows, ';');
+  toast('Archivo listo. Compl\u00E9talo en Excel y p\u00E9galo en Producto \u2192 Masivo','ok');
 }
 
 // ══════════════════════════════════════════
