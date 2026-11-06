@@ -605,9 +605,10 @@ async function testConnection() {
       if (n > 1) setBtn('btn-test', true, 'Reintentando ('+(n-1)+')...');
     });
     if (d && d.ok) {
+      backendVersion = d.v || '';
       setConn('ok');
       document.getElementById('api-url-input').classList.add('connected');
-      toast('¡Conectado a Google Sheets! ✓','ok');
+      toast('¡Conectado a Google Sheets! ✓'+(backendVersion?'  (backend v'+backendVersion+')':''),'ok');
       loadAll();
     } else { setConn('err'); toast('Respuesta inválida','err'); }
   } catch(e) {
@@ -617,11 +618,18 @@ async function testConnection() {
   setBtn('btn-test', false, 'Probar conexión');
 }
 
+// Versión del backend que respondió al ping. Se muestra junto a "Conectado"
+// porque guardar el código en Apps Script NO actualiza el Web App publicado: hay
+// que crear una implementación nueva. Varios fallos del proyecto fueron código
+// corregido en el editor pero nunca desplegado, y no había forma de verlo sin
+// abrir la URL del ping a mano.
+var backendVersion = '';
+
 function setConn(s) {
   var dot = document.getElementById('conn-dot');
   var lbl = document.getElementById('conn-label');
   connected = s === 'ok';
-  if      (s==='ok')  { dot.className='conn-dot ok';  lbl.textContent='Conectado';        lbl.style.color='var(--accent)'; }
+  if      (s==='ok')  { dot.className='conn-dot ok';  lbl.textContent='Conectado'+(backendVersion?' · v'+backendVersion:''); lbl.style.color='var(--accent)'; }
   else if (s==='err') { dot.className='conn-dot err'; lbl.textContent='Error de conexión'; lbl.style.color='var(--danger)'; }
   else                { dot.className='conn-dot';     lbl.textContent='Conectando...';     lbl.style.color='var(--muted)'; }
 }
